@@ -102,7 +102,12 @@ def delete_event(event_id):
 
 @app.post("/api/v1/participants")
 def add_participant():
-    abort(501, "TODO task 3: implement POST /api/v1/participants")
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict) or not isinstance(body.get("name"), str):
+        abort(400, "name must be a string")
+    reply = registrations.CreateParticipant(
+        registration_pb2.CreateParticipantRequest(name=body["name"]))
+    return jsonify(fields(reply)), 201
 
 
 @app.get("/api/v1/participants/<int:participant_id>")
