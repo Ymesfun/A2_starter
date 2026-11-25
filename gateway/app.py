@@ -117,7 +117,30 @@ def list_bookings(event_id):
 
 @app.post("/api/v1/registrations")
 def book():
-    abort(501, "TODO task 4: implement POST /api/v1/registrations")
+    body = request.get_json(silent=True)
+
+    if not isinstance(body, dict):
+        abort(400, "Request body must be valid JSON")
+
+    event_id = body.get("event_id")
+    participant_id = body.get("participant_id")
+
+    if (not isinstance(event_id, int)
+            or isinstance(event_id, bool)
+            or event_id <= 0
+            or not isinstance(participant_id, int)
+            or isinstance(participant_id, bool)
+            or participant_id <= 0):
+        abort(400, "Valid event_id and participant_id are required")
+
+    booking = registrations.CreateBooking(
+        registration_pb2.CreateBookingRequest(
+            event_id=event_id,
+            participant_id=participant_id
+        )
+    )
+
+    return jsonify(fields(booking)), 201
 
 
 @app.delete("/api/v1/registrations/<int:booking_id>")
