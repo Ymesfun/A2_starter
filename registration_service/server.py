@@ -35,6 +35,23 @@ class RegistrationService(rpc.RegistrationServiceServicer):
     def __init__(self, events):
         self.events = events
 
+    def ListBookings(self, request, context):
+        bookings = read(
+            """SELECT b.booking_id, b.event_id, b.participant_id,
+                      p.name AS participant_name
+               FROM bookings b
+               JOIN participants p
+                 ON b.participant_id = p.participant_id
+               WHERE b.event_id = %s
+                 AND b.state = 'confirmed'
+               ORDER BY b.booking_id ASC""",
+            (request.event_id,)
+        )
+
+        return pb.ListBookingsResponse(
+            bookings=[pb.Booking(**booking) for booking in bookings]
+        )
+
     def CreateBooking(self, request, context):
         event_id = request.event_id
         participant_id = request.participant_id

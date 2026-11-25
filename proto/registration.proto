@@ -7,6 +7,7 @@ service RegistrationService {
   rpc CreateParticipant(CreateParticipantRequest) returns (Participant);
   rpc GetParticipant(ParticipantId) returns (Participant);
   rpc CreateBooking(CreateBookingRequest) returns (Booking);
+  rpc ListBookings(ListEventBookingsRequest) returns (ListBookingsResponse);
 }
 
 message BookingId { int64 booking_id = 1; }
@@ -16,3 +17,5 @@ message ParticipantId { int64 participant_id = 1; }
 message Participant { int64 participant_id = 1; string name = 2; }
 message CreateBookingRequest { int64 event_id = 1; int64 participant_id = 2; }
 message Booking { int64 booking_id = 1; int64 event_id = 2; int64 participant_id = 3; string participant_name = 4; }
+message ListEventBookingsRequest { int64 event_id = 1; }
+message ListBookingsResponse { repeated Booking bookings = 1; }
