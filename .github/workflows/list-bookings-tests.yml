@@ -1,0 +1,141 @@
+
+name: ListBookings Tests
+
+on:
+  push:
+    branches:
+      - task-4-list-bookings
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  test-list-bookings:
+    runs-on: ubuntu-latest
+
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: testpassword
+          MYSQL_ROOT_HOST: "%"
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: make install
+
+      - name: Generate protobuf bindings
+        run: make gen
+
+      - name: Prepare databases
+        run: |
+          mysql -h 127.0.0.1 -u root -ptestpassword < event_service/schema.sql
+          mysql -h 127.0.0.1 -u root -ptestpassword < registration_service/schema.sql
+
+      - name: Configure test databases
+        run: |
+          .venv/bin/python - <<'PY'
+          import json
+          for path in [
+              "event_service/config.json",
+              "registration_service/config.json",
+          ]:
+              with open(path) as file:
+                  config = json.load(file)
+              config["db"]["password"] = "testpassword"
+              with open(path, "w") as file:
+                  json.dump(config, file)
+          PY
+
+      - name: Test ListBookings API
+        run: |
+          (cd event_service && PYTHONPATH=generated ../.venv/bin/python server.py) > event.log 2>&1 &
+          (cd registration_service && PYTHONPATH=generated ../.venv/bin/python server.py) > registration.log 2>&1 &
+          (cd gateway && PYTHONPATH=generated ../.venv/bin/python app.py) > gateway.log 2>&1 &
+
+          trap 'cat event.log registration.log gateway.log' EXIT
+
+          .venv/bin/python - <<'PY'
+          import json
+          import time
+          from urllib.request import Request, urlopen
+          from urllib.error import URLError
+
+          BASE = "http://127.0.0.1:8080/api/v1"
+
+          def get(path):
+              with urlopen(BASE + path, timeout=5) as response:
+                  return response.status, json.load(response)
+
+          for _ in range(30):
+              try:
+                  get("/events/1")
+                  break
+              except (URLError, TimeoutError):
+                  time.sleep(1)
+          else:
+              raise AssertionError("Gateway did not start")
+
+          status, bookings = get("/events/1/registrations")
+          assert status == 200
+          assert len(bookings) == 3
+          assert [b["participant_name"] for b in bookings] == [
+              "Alex", "Bao", "Casey"
+          ]
+          assert [b["booking_id"] for b in bookings] == [1, 2, 3]
+          print("PASS: Three seeded confirmed bookings returned")
+
+          status, bookings = get("/events/2/registrations")
+          assert status == 200
+          assert bookings == []
+          print("PASS: Empty event returns HTTP 200 and []")
+
+          req = Request(
+              BASE + "/registrations",
+              data=json.dumps({
+                  "event_id": 2,
+                  "participant_id": 4
+              }).encode(),
+              headers={"Content-Type": "application/json"},
+              method="POST"
+          )
+          with urlopen(req, timeout=5) as response:
+              assert response.status == 201
+              created = json.load(response)
+
+          status, bookings = get("/events/2/registrations")
+          assert status == 200
+          assert len(bookings) == 1
+          assert bookings[0] == created
+          assert bookings[0]["participant_name"] == "Dana"
+          print("PASS: Newly created booking appears")
+
+          req = Request(
+              BASE + "/registrations/" + str(created["booking_id"]),
+              method="DELETE"
+          )
+          with urlopen(req, timeout=5) as response:
+              assert response.status == 204
+
+          status, bookings = get("/events/2/registrations")
+          assert status == 200
+          assert bookings == []
+          print("PASS: Cancelled booking is excluded")
+
+          print("All ListBookings tests passed")
+          PY
