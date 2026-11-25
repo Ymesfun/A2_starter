@@ -35,6 +35,58 @@ class RegistrationService(rpc.RegistrationServiceServicer):
     def __init__(self, events):
         self.events = events
 
+    def CreateBooking(self, request, context):
+        event_id = request.event_id
+        participant_id = request.participant_id
+
+        if event_id <= 0 or participant_id <= 0:
+            context.abort(grpc.StatusCode.INVALID_ARGUMENT, "Invalid event or participant ID")
+
+        participant = read(
+            "SELECT name FROM participants WHERE participant_id = %s",
+            (participant_id,)
+        )
+
+        if not participant:
+            context.abort(grpc.StatusCode.NOT_FOUND, "Participant not found")
+
+        existing = read(
+            """SELECT booking_id FROM bookings
+               WHERE event_id = %s AND participant_id = %s
+               AND state = 'confirmed'""",
+            (event_id, participant_id)
+        )
+
+        if existing:
+            context.abort(grpc.StatusCode.ALREADY_EXISTS, "Booking already exists")
+
+        call(
+            self.events.ReserveSeat,
+            event_pb2.EventId(event_id=event_id),
+            context
+        )
+
+        try:
+            booking_id = write(
+                """INSERT INTO bookings (event_id, participant_id, state)
+                   VALUES (%s, %s, 'confirmed')""",
+                (event_id, participant_id)
+            )
+        except mysql.connector.Error:
+            call(
+                self.events.ReleaseSeat,
+                event_pb2.EventId(event_id=event_id),
+                context
+            )
+            context.abort(grpc.StatusCode.INTERNAL, "Could not create booking")
+
+        return pb.Booking(
+            booking_id=booking_id,
+            event_id=event_id,
+            participant_id=participant_id,
+            participant_name=participant[0]["name"]
+        )
+
     def CancelBooking(self, request, context):
         found = read("SELECT event_id, state FROM bookings WHERE booking_id = %s", (request.booking_id,))
         if not found:
