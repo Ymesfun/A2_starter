@@ -36,6 +36,8 @@ class RegistrationService(rpc.RegistrationServiceServicer):
         self.events = events
 
     def ListBookings(self, request, context):
+        # Added an emergency guard to try to return a 400 if the event doesnt exist
+        call(self.events.GetEvent, event_pb2.EventId(event_id=request.event_id), context)
         bookings = read(
             """SELECT b.booking_id, b.event_id, b.participant_id,
                       p.name AS participant_name
