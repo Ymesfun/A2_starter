@@ -53,24 +53,61 @@ def get_event(event_id):
     return jsonify(fields(events.GetEvent(event_pb2.EventId(event_id=event_id))))
 
 
+STAFF_ROUTES = {"add_event", "edit_event", "delete_event"}
+MAX = 2**31 - 1
+
+@app.before_request
+def require_staff_token():
+    if request.endpoint in STAFF_ROUTES:
+        if request.headers.get("Authorization") != f"Bearer {CONFIG['staff_token']}":
+            abort(401, "Missing or invalid staff token")
+        
+def valid_capacity(value):
+    return isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= MAX
+
+
 @app.post("/api/v1/events")
 def add_event():
-    abort(501, "TODO task 2: implement POST /api/v1/events")
+    body = request.get_json(silent=True)
+    if (not isinstance(body, dict) or not isinstance(body.get("name"), str)
+            or not valid_capacity(body.get("capacity"))):
+        abort(400, "name must be a string and non negative ")
+    reply = events.CreateEvents(event_pb2.CreateEventsRequest(
+        name=body["name"], capacity=body["capacity"]))
+    return jsonify(fields(reply)), 201
 
 
 @app.patch("/api/v1/events/<int:event_id>")
 def edit_event(event_id):
-    abort(501, "TODO task 2: implement PATCH /api/v1/events/<event_id>")
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict) or not ({"name", "capacity"} & body.keys()):
+        abort(400, "send name and/or capacity")
+    if "name" in body and not isinstance(body["name"], str):
+        abort(400, "name must be a string")
+    if "capacity" in body and not valid_capacity(body["capacity"]):
+        abort(400, "capacity must be a non-negative integer")
+    update = event_pb2.UpdateEventRequest(event_id=event_id)
+    if "name" in body:
+        update.name = body["name"]
+    if "capacity" in body:
+        update.capacity = body["capacity"]
+    return jsonify(fields(events.UpdateEvent(update)))
 
 
 @app.delete("/api/v1/events/<int:event_id>")
 def delete_event(event_id):
-    abort(501, "TODO task 2: implement DELETE /api/v1/events/<event_id>")
+    events.DeleteEvent(event_pb2.EventId(event_id=event_id))
+    return "", 204
 
 
 @app.post("/api/v1/participants")
 def add_participant():
-    abort(501, "TODO task 3: implement POST /api/v1/participants")
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict) or not isinstance(body.get("name"), str):
+        abort(400, "name must be a string")
+    reply = registrations.CreateParticipant(
+        registration_pb2.CreateParticipantRequest(name=body["name"]))
+    return jsonify(fields(reply)), 201
 
 
 @app.get("/api/v1/participants/<int:participant_id>")
@@ -83,12 +120,39 @@ def get_participant(participant_id):
 
 @app.get("/api/v1/events/<int:event_id>/registrations")
 def list_bookings(event_id):
-    abort(501, "TODO task 4: implement GET /api/v1/events/<event_id>/registrations")
+    response = registrations.ListBookings(
+        registration_pb2.ListEventBookingsRequest(event_id=event_id)
+    )
+
+    return jsonify(manyfields(response.bookings)), 200
 
 
 @app.post("/api/v1/registrations")
 def book():
-    abort(501, "TODO task 4: implement POST /api/v1/registrations")
+    body = request.get_json(silent=True)
+
+    if not isinstance(body, dict):
+        abort(400, "Request body must be valid JSON")
+
+    event_id = body.get("event_id")
+    participant_id = body.get("participant_id")
+
+    if (not isinstance(event_id, int)
+            or isinstance(event_id, bool)
+            or event_id <= 0
+            or not isinstance(participant_id, int)
+            or isinstance(participant_id, bool)
+            or participant_id <= 0):
+        abort(400, "Valid event_id and participant_id are required")
+
+    booking = registrations.CreateBooking(
+        registration_pb2.CreateBookingRequest(
+            event_id=event_id,
+            participant_id=participant_id
+        )
+    )
+
+    return jsonify(fields(booking)), 201
 
 
 @app.delete("/api/v1/registrations/<int:booking_id>")
